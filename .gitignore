@@ -1,0 +1,20 @@
+# Python
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.env
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# System
+.DS_Store
+*.log
