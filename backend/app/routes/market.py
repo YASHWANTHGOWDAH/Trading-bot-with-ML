@@ -25,6 +25,8 @@ async def get_overview():
 
 @router.get("/{symbol}")
 @router.get("/{symbol}/summary")
+@router.get("/quote/{symbol}")
+@router.get("/{symbol}/quote")
 async def get_symbol_summary(symbol: str):
     """Returns real-time quote, today's price change, and latest indicators for a symbol."""
     sym = symbol.upper()
@@ -39,6 +41,7 @@ async def get_symbol_summary(symbol: str):
         )
 
 @router.get("/{symbol}/history")
+@router.get("/history/{symbol}")
 async def get_history(
     symbol: str,
     timeframe: str = Query("1M", pattern="^(1D|1W|1M|3M|6M|1Y)$"),

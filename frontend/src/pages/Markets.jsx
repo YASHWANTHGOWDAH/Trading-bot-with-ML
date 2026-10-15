@@ -166,6 +166,8 @@ export default function Markets() {
 
             const badgeClass = sig === 'BUY' ? 'badge-buy' : (sig === 'SELL' ? 'badge-sell' : 'badge-hold');
 
+            const currSymbol = stk.currency || (['AAPL','NVDA','MSFT','TSLA','AMZN','GOOGL','META','NFLX','AMD','INTC'].includes(stk.symbol) ? '$' : '₹');
+
             return (
               <div
                 key={stk.symbol}
@@ -216,7 +218,7 @@ export default function Markets() {
                   <div>
                     <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Current Price</span>
                     <span style={{ fontSize: '22px', fontWeight: 800, color: '#f8fafc' }}>
-                      ₹{stk.current_price?.toFixed(2)}
+                      {currSymbol}{stk.current_price?.toFixed(2)}
                     </span>
                   </div>
 
@@ -248,7 +250,7 @@ export default function Markets() {
                   color: '#94a3b8'
                 }}>
                   <span>RSI: <strong style={{ color: '#cbd5e1' }}>{stk.indicators?.rsi || '50'}</strong></span>
-                  <span>SMA20: <strong style={{ color: '#cbd5e1' }}>₹{stk.indicators?.sma20 || stk.current_price?.toFixed(0)}</strong></span>
+                  <span>SMA20: <strong style={{ color: '#cbd5e1' }}>{currSymbol}{stk.indicators?.sma20 || stk.current_price?.toFixed(0)}</strong></span>
                   <span>Vol: <strong style={{ color: '#cbd5e1' }}>{(stk.volume / 1000000).toFixed(1)}M</strong></span>
                 </div>
 

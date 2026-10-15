@@ -59,24 +59,56 @@ export default function Dashboard({ user, portfolio, onTradeComplete }) {
   const [isLoadingChart, setIsLoadingChart] = useState(false);
   const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
   
+  // Real-time quote streaming & price tick flash state
+  const [priceFlash, setPriceFlash] = useState(null); // 'up' | 'down' | null
+  const [isRefreshingQuote, setIsRefreshingQuote] = useState(false);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const [lastUpdatedTime, setLastUpdatedTime] = useState(null);
+  
   // Quick trade modal/card state
   const [tradeAction, setTradeAction] = useState('BUY');
   const [tradeQuantity, setTradeQuantity] = useState(5);
   const [tradeLoading, setTradeLoading] = useState(false);
   const [tradeMessage, setTradeMessage] = useState(null);
 
-  // Fetch Quote, Historical Candles, and AI Analysis for selected symbol
-  const fetchStockData = async (sym = selectedSymbol, tf = timeframe, refresh = false) => {
+  // Fast quote fetcher (fraction of a second response)
+  const fetchLiveQuote = async (sym = selectedSymbol, isSilent = false) => {
+    if (!isSilent) setIsRefreshingQuote(true);
+    try {
+      const res = await marketService.getQuote(sym);
+      const newQuote = res.data;
+      if (newQuote) {
+        setQuote((prevQuote) => {
+          if (prevQuote && prevQuote.symbol === newQuote.symbol) {
+            const prevP = Number(prevQuote.current_price);
+            const newP = Number(newQuote.current_price);
+            if (newP > prevP) {
+              setPriceFlash('up');
+              setTimeout(() => setPriceFlash(null), 1200);
+            } else if (newP < prevP) {
+              setPriceFlash('down');
+              setTimeout(() => setPriceFlash(null), 1200);
+            }
+          }
+          return newQuote;
+        });
+        setLastUpdatedTime(new Date().toLocaleTimeString());
+      }
+    } catch (err) {
+      console.error('Error fetching live quote:', err);
+    } finally {
+      if (!isSilent) setIsRefreshingQuote(false);
+    }
+  };
+
+  // Fetch Historical Candles
+  const fetchChartData = async (sym = selectedSymbol, tf = timeframe, refresh = false) => {
     setIsLoadingChart(true);
     try {
-      const [quoteRes, historyRes] = await Promise.all([
-        marketService.getQuote(sym),
-        marketService.getHistory(sym, tf, refresh),
-      ]);
-      setQuote(quoteRes.data);
+      const historyRes = await marketService.getHistory(sym, tf, refresh);
       setCandles(historyRes.data.candles || []);
     } catch (err) {
-      console.error('Error fetching stock data:', err);
+      console.error('Error fetching chart data:', err);
     } finally {
       setIsLoadingChart(false);
     }
@@ -94,10 +126,21 @@ export default function Dashboard({ user, portfolio, onTradeComplete }) {
     }
   };
 
+  // Load quote immediately, then chart and AI analysis
   useEffect(() => {
-    fetchStockData(selectedSymbol, timeframe);
+    fetchLiveQuote(selectedSymbol, false);
+    fetchChartData(selectedSymbol, timeframe);
     fetchAIAnalysis(selectedSymbol);
   }, [selectedSymbol, timeframe]);
+
+  // Live Auto-Refresh: stream quote update in fraction of time every 3.5s
+  useEffect(() => {
+    if (!autoRefreshEnabled) return;
+    const interval = setInterval(() => {
+      fetchLiveQuote(selectedSymbol, true);
+    }, 3500);
+    return () => clearInterval(interval);
+  }, [selectedSymbol, autoRefreshEnabled]);
 
   // Handle Quick Trade
   const handleQuickTrade = async (action) => {
@@ -126,6 +169,7 @@ export default function Dashboard({ user, portfolio, onTradeComplete }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
+  const currency = quote?.currency || (['AAPL','NVDA','MSFT','TSLA','AMZN','GOOGL','META','NFLX','AMD','INTC'].includes(selectedSymbol) ? '$' : '₹');
   const currentPrice = quote?.current_price || 220.0;
   const changePercent = quote?.change_percent || 0.0;
   const changeAmt = quote?.change_amount || 0.0;
@@ -337,10 +381,25 @@ export default function Dashboard({ user, portfolio, onTradeComplete }) {
                 {quote?.exchange || 'NASDAQ'}
               </span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '4px' }}>
-              <span style={{ fontSize: '24px', fontWeight: 800, color: '#f8fafc' }}>
-                ₹{Number(currentPrice).toFixed(2)}
+            
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '14px', marginTop: '6px' }}>
+              {/* Dynamic Price with real-time flash glow animation */}
+              <span
+                className={`price-ticker-display ${priceFlash === 'up' ? 'flash-up' : priceFlash === 'down' ? 'flash-down' : ''}`}
+                style={{
+                  fontSize: '28px',
+                  fontWeight: 800,
+                  color: '#f8fafc',
+                  padding: '2px 8px',
+                  borderRadius: '8px',
+                  transition: 'all 0.25s ease',
+                  display: 'inline-block'
+                }}
+              >
+                {currency}{Number(currentPrice).toFixed(2)}
               </span>
+
+              {/* Price Change Pill */}
               <div style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -352,19 +411,59 @@ export default function Dashboard({ user, portfolio, onTradeComplete }) {
                 {isPositive ? <ArrowUpRight size={18} /> : <ArrowDownRight size={18} />}
                 <span>{isPositive ? '+' : ''}{changeAmt.toFixed(2)} ({isPositive ? '+' : ''}{changePercent.toFixed(2)}%)</span>
               </div>
+
+              {/* Live Streaming Indicator Badge */}
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 10px',
+                borderRadius: '20px',
+                background: autoRefreshEnabled ? 'rgba(16, 185, 129, 0.12)' : 'rgba(148, 163, 184, 0.12)',
+                border: `1px solid ${autoRefreshEnabled ? 'rgba(16, 185, 129, 0.3)' : 'rgba(148, 163, 184, 0.2)'}`,
+                fontSize: '11px',
+                fontWeight: 700,
+                color: autoRefreshEnabled ? '#10b981' : '#94a3b8'
+              }}>
+                <span className={autoRefreshEnabled ? "live-pulse-dot" : ""} style={{ width: '7px', height: '7px', borderRadius: '50%', background: autoRefreshEnabled ? '#10b981' : '#64748b' }} />
+                <span>{autoRefreshEnabled ? 'LIVE STREAM • 3.5s' : 'STREAM PAUSED'}</span>
+              </div>
+
+              {/* Instant Manual Refresh */}
+              <button
+                onClick={() => fetchLiveQuote(selectedSymbol, false)}
+                title="Fetch latest market price quote immediately"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  transition: 'all 0.15s'
+                }}
+              >
+                <RefreshCw size={12} className={isRefreshingQuote ? 'spin-icon' : ''} />
+                <span>{isRefreshingQuote ? 'Refreshing...' : 'Refresh Quote'}</span>
+              </button>
             </div>
           </div>
         </div>
 
         {/* Quick Stats Pill Group */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', alignItems: 'center' }}>
           <div>
             <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>24h High</span>
-            <span style={{ fontSize: '14px', fontWeight: 600, color: '#e2e8f0' }}>₹{quote?.high?.toFixed(2) || '—'}</span>
+            <span style={{ fontSize: '14px', fontWeight: 600, color: '#e2e8f0' }}>{currency}{quote?.high?.toFixed(2) || '—'}</span>
           </div>
           <div>
             <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>24h Low</span>
-            <span style={{ fontSize: '14px', fontWeight: 600, color: '#e2e8f0' }}>₹{quote?.low?.toFixed(2) || '—'}</span>
+            <span style={{ fontSize: '14px', fontWeight: 600, color: '#e2e8f0' }}>{currency}{quote?.low?.toFixed(2) || '—'}</span>
           </div>
           <div>
             <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Volume</span>
@@ -375,9 +474,9 @@ export default function Dashboard({ user, portfolio, onTradeComplete }) {
             <span style={{ fontSize: '14px', fontWeight: 600, color: '#38bdf8' }}>{quote?.indicators?.rsi || '50'}</span>
           </div>
           <div>
-            <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Market Timestamp</span>
-            <span style={{ fontSize: '13px', fontWeight: 600, color: '#a855f7' }}>
-              {quote?.timestamp || (quote?.last_updated ? quote.last_updated.slice(0, 16).replace('T', ' ') : 'Live')}
+            <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Feed Source</span>
+            <span style={{ fontSize: '12px', fontWeight: 700, color: '#10b981' }}>
+              {quote?.source === 'yfinance_live' ? 'yfinance (Real-Time)' : 'Live Feed'}
             </span>
           </div>
         </div>
@@ -397,7 +496,7 @@ export default function Dashboard({ user, portfolio, onTradeComplete }) {
           timeframe={timeframe}
           onTimeframeChange={setTimeframe}
           isLoading={isLoadingChart}
-          currency="₹"
+          currency={currency}
         />
 
         {/* Right: AI Market Signal Box */}
@@ -471,7 +570,7 @@ export default function Dashboard({ user, portfolio, onTradeComplete }) {
             <input
               type="text"
               readOnly
-              value={`₹${currentPrice.toFixed(2)}`}
+              value={`${currency}${currentPrice.toFixed(2)}`}
               className="input-field"
               style={{ fontWeight: 600 }}
             />
@@ -505,7 +604,7 @@ export default function Dashboard({ user, portfolio, onTradeComplete }) {
               fontWeight: 800,
               color: '#38bdf8'
             }}>
-              ₹{(currentPrice * tradeQuantity).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+              {currency}{(currentPrice * tradeQuantity).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
             </div>
           </div>
 
@@ -547,8 +646,46 @@ export default function Dashboard({ user, portfolio, onTradeComplete }) {
         )}
       </div>
 
-      {/* Responsive layout CSS */}
+      {/* Animation & Responsive layout CSS */}
       <style>{`
+        @keyframes flashGreen {
+          0% { background: rgba(16, 185, 129, 0.45); transform: scale(1.05); color: #10b981; }
+          60% { background: rgba(16, 185, 129, 0.2); }
+          100% { background: transparent; transform: scale(1); }
+        }
+        @keyframes flashRed {
+          0% { background: rgba(239, 68, 68, 0.45); transform: scale(1.05); color: #ef4444; }
+          60% { background: rgba(239, 68, 68, 0.2); }
+          100% { background: transparent; transform: scale(1); }
+        }
+        @keyframes pulseGlow {
+          0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+          70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        .spin-icon {
+          animation: spin 0.75s linear infinite;
+        }
+        .flash-up {
+          animation: flashGreen 1.2s ease-out;
+          color: #10b981 !important;
+        }
+        .flash-down {
+          animation: flashRed 1.2s ease-out;
+          color: #ef4444 !important;
+        }
+        .live-pulse-dot {
+          display: inline-block;
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background: #10b981;
+          animation: pulseGlow 2s infinite;
+        }
         @media (max-width: 1024px) {
           .chart-ai-grid {
             grid-template-columns: 1fr !important;

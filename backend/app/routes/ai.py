@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, status
@@ -56,16 +57,22 @@ async def get_all_signals():
         doc["_id"] = str(doc["_id"])
         all_signals[sym] = doc
         
-    # For any missing symbols, generate them
-    for s in SUPPORTED_STOCKS:
-        sym = s["symbol"]
-        if sym not in all_signals:
+    # For any missing symbols, generate them concurrently
+    missing = [s["symbol"] for s in SUPPORTED_STOCKS if s["symbol"] not in all_signals]
+    if missing:
+        async def _gen(s_sym):
             try:
-                df = await get_historical_ohlcv(sym, timeframe="3M")
-                analysis = await generate_and_save_analysis(sym, df)
-                all_signals[sym] = analysis
+                df = await get_historical_ohlcv(s_sym, timeframe="3M")
+                analysis = await generate_and_save_analysis(s_sym, df)
+                return s_sym, analysis
             except Exception as e:
-                logger.error(f"Error auto-generating signal for {sym}: {e}")
+                logger.error(f"Error auto-generating signal for {s_sym}: {e}")
+                return s_sym, None
+                
+        results = await asyncio.gather(*[_gen(m) for m in missing])
+        for s_sym, analysis in results:
+            if analysis:
+                all_signals[s_sym] = analysis
                 
     return {"signals": list(all_signals.values())}
 

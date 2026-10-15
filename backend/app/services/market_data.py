@@ -1,4 +1,7 @@
+import asyncio
 import logging
+import random
+import time
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 import numpy as np
@@ -12,16 +15,16 @@ logger = logging.getLogger("trademind.market_data")
 # Supported stock universe with display metadata
 SUPPORTED_STOCKS = [
     # US Tech & Global Leaders
-    {"symbol": "AAPL", "name": "Apple Inc.", "exchange": "NASDAQ", "currency": "₹", "base_price": 224.50, "yf_ticker": "AAPL"},
-    {"symbol": "MSFT", "name": "Microsoft Corp.", "exchange": "NASDAQ", "currency": "₹", "base_price": 428.10, "yf_ticker": "MSFT"},
-    {"symbol": "NVDA", "name": "NVIDIA Corporation", "exchange": "NASDAQ", "currency": "₹", "base_price": 122.80, "yf_ticker": "NVDA"},
-    {"symbol": "TSLA", "name": "Tesla Inc.", "exchange": "NASDAQ", "currency": "₹", "base_price": 248.20, "yf_ticker": "TSLA"},
-    {"symbol": "AMZN", "name": "Amazon.com Inc.", "exchange": "NASDAQ", "currency": "₹", "base_price": 186.40, "yf_ticker": "AMZN"},
-    {"symbol": "GOOGL", "name": "Alphabet Inc.", "exchange": "NASDAQ", "currency": "₹", "base_price": 164.75, "yf_ticker": "GOOGL"},
-    {"symbol": "META", "name": "Meta Platforms Inc.", "exchange": "NASDAQ", "currency": "₹", "base_price": 585.30, "yf_ticker": "META"},
-    {"symbol": "NFLX", "name": "Netflix Inc.", "exchange": "NASDAQ", "currency": "₹", "base_price": 710.20, "yf_ticker": "NFLX"},
-    {"symbol": "AMD", "name": "Advanced Micro Devices", "exchange": "NASDAQ", "currency": "₹", "base_price": 165.40, "yf_ticker": "AMD"},
-    {"symbol": "INTC", "name": "Intel Corporation", "exchange": "NASDAQ", "currency": "₹", "base_price": 22.80, "yf_ticker": "INTC"},
+    {"symbol": "AAPL", "name": "Apple Inc.", "exchange": "NASDAQ", "currency": "$", "base_price": 224.50, "yf_ticker": "AAPL"},
+    {"symbol": "MSFT", "name": "Microsoft Corp.", "exchange": "NASDAQ", "currency": "$", "base_price": 428.10, "yf_ticker": "MSFT"},
+    {"symbol": "NVDA", "name": "NVIDIA Corporation", "exchange": "NASDAQ", "currency": "$", "base_price": 122.80, "yf_ticker": "NVDA"},
+    {"symbol": "TSLA", "name": "Tesla Inc.", "exchange": "NASDAQ", "currency": "$", "base_price": 248.20, "yf_ticker": "TSLA"},
+    {"symbol": "AMZN", "name": "Amazon.com Inc.", "exchange": "NASDAQ", "currency": "$", "base_price": 186.40, "yf_ticker": "AMZN"},
+    {"symbol": "GOOGL", "name": "Alphabet Inc.", "exchange": "NASDAQ", "currency": "$", "base_price": 164.75, "yf_ticker": "GOOGL"},
+    {"symbol": "META", "name": "Meta Platforms Inc.", "exchange": "NASDAQ", "currency": "$", "base_price": 585.30, "yf_ticker": "META"},
+    {"symbol": "NFLX", "name": "Netflix Inc.", "exchange": "NASDAQ", "currency": "$", "base_price": 710.20, "yf_ticker": "NFLX"},
+    {"symbol": "AMD", "name": "Advanced Micro Devices", "exchange": "NASDAQ", "currency": "$", "base_price": 165.40, "yf_ticker": "AMD"},
+    {"symbol": "INTC", "name": "Intel Corporation", "exchange": "NASDAQ", "currency": "$", "base_price": 22.80, "yf_ticker": "INTC"},
 
     # Indian Market Leaders (NSE)
     {"symbol": "RELIANCE", "name": "Reliance Industries Ltd", "exchange": "NSE", "currency": "₹", "base_price": 2980.00, "yf_ticker": "RELIANCE.NS"},
@@ -202,8 +205,8 @@ async def get_historical_ohlcv(symbol: str, timeframe: str = "1M", force_refresh
             df = pd.DataFrame(cached["data"])
             return calculate_technical_indicators(df)
             
-    # 2. Try fetching live from yfinance, fallback to synthetic
-    df = fetch_yfinance_ohlcv(sym, timeframe)
+    # 2. Try fetching live from yfinance (run in thread pool to prevent blocking async loop)
+    df = await asyncio.to_thread(fetch_yfinance_ohlcv, sym, timeframe)
     if df is None or df.empty or len(df) < 5:
         df = generate_synthetic_ohlcv(sym, timeframe)
         
@@ -225,16 +228,115 @@ async def get_historical_ohlcv(symbol: str, timeframe: str = "1M", force_refresh
     
     return df_with_ind
 
-async def get_stock_quote(symbol: str) -> Dict[str, Any]:
-    """Get current price, change, volume, exact timestamp, and quick stats for a stock."""
+# Ultra-fast in-memory quote caching for sub-second responses
+_FAST_QUOTE_CACHE: Dict[str, Dict[str, Any]] = {}
+_INDICATOR_SNAPSHOT_CACHE: Dict[str, Dict[str, Any]] = {}
+FAST_QUOTE_CACHE_TTL = 3.5  # 3.5 seconds cache TTL
+
+def _fetch_fast_info_sync(yf_symbol: str) -> Optional[Dict[str, Any]]:
+    """Synchronous worker that queries yfinance fast_info in a background worker thread."""
+    try:
+        ticker = yf.Ticker(yf_symbol)
+        fast = ticker.fast_info
+        last_price = getattr(fast, "last_price", None)
+        if last_price is not None and not np.isnan(last_price) and float(last_price) > 0:
+            last_p = round(float(last_price), 2)
+            prev_close = getattr(fast, "previous_close", None)
+            prev_p = round(float(prev_close), 2) if (prev_close is not None and not np.isnan(prev_close)) else last_p
+            open_p = getattr(fast, "open", None)
+            open_price = round(float(open_p), 2) if (open_p is not None and not np.isnan(open_p)) else prev_p
+            high_p = getattr(fast, "day_high", None)
+            day_high = round(float(high_p), 2) if (high_p is not None and not np.isnan(high_p)) else max(last_p, open_price)
+            low_p = getattr(fast, "day_low", None)
+            day_low = round(float(low_p), 2) if (low_p is not None and not np.isnan(low_p)) else min(last_p, open_price)
+            vol = getattr(fast, "last_volume", None)
+            volume = int(vol) if (vol is not None and not np.isnan(vol)) else 1500000
+            
+            return {
+                "last_price": last_p,
+                "previous_close": prev_p,
+                "open": open_price,
+                "high": day_high,
+                "low": day_low,
+                "volume": volume
+            }
+    except Exception as e:
+        logger.debug(f"fast_info sync fetch failed for {yf_symbol}: {e}")
+    return None
+
+async def get_stock_quote(symbol: str, force_refresh: bool = False) -> Dict[str, Any]:
+    """
+    Get current price, change, volume, exact timestamp, and stats for a stock in a fraction of a second.
+    Uses yfinance fast_info in a thread pool and a 3.5-second in-memory cache.
+    Falls back gracefully to OHLCV cache and synthetic model so it never fails.
+    """
     sym = symbol.upper()
-    meta = SYMBOL_MAP.get(sym, {"name": sym, "exchange": "NASDAQ", "currency": "₹"})
+    meta = SYMBOL_MAP.get(sym, {"name": sym, "exchange": "NASDAQ", "currency": "$", "base_price": 100.0})
+    yf_symbol = meta.get("yf_ticker", sym)
+    currency = meta.get("currency", "$" if meta.get("exchange") == "NASDAQ" else "₹")
     
-    # Retrieve 1M data for robust current quote and indicators
+    now_ts = time.time()
+    
+    # 1. Fast cache hit (< 0.001s)
+    if not force_refresh and sym in _FAST_QUOTE_CACHE:
+        cached_entry = _FAST_QUOTE_CACHE[sym]
+        if (now_ts - cached_entry["cached_at"]) < FAST_QUOTE_CACHE_TTL:
+            return cached_entry["data"]
+
+    # 2. Fast-path: query yfinance fast_info asynchronously in a thread pool
+    fast_data = await asyncio.to_thread(_fetch_fast_info_sync, yf_symbol)
+    
+    if fast_data:
+        current_price = fast_data["last_price"]
+        prev_close = fast_data["previous_close"]
+        change_amt = round(current_price - prev_close, 2)
+        change_pct = round((change_amt / prev_close) * 100, 2) if prev_close > 0 else 0.0
+        
+        # Snapshot or reuse technical indicators
+        indicators = _INDICATOR_SNAPSHOT_CACHE.get(sym)
+        if not indicators:
+            try:
+                df = await get_historical_ohlcv(sym, timeframe="1M")
+                indicators = extract_latest_indicators(df)
+                _INDICATOR_SNAPSHOT_CACHE[sym] = indicators
+            except Exception:
+                indicators = {
+                    "close": current_price,
+                    "rsi": 50.0,
+                    "macd_trend": "BULLISH" if change_pct >= 0 else "BEARISH",
+                    "rsi_state": "NEUTRAL"
+                }
+        else:
+            indicators = dict(indicators)
+            indicators["close"] = current_price
+            indicators["recent_return_1d"] = change_pct
+
+        quote_data = {
+            "symbol": sym,
+            "name": meta.get("name", sym),
+            "exchange": meta.get("exchange", "NASDAQ"),
+            "currency": currency,
+            "current_price": current_price,
+            "change_amount": change_amt,
+            "change_percent": change_pct,
+            "open": fast_data["open"],
+            "high": fast_data["high"],
+            "low": fast_data["low"],
+            "volume": fast_data["volume"],
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "indicators": indicators,
+            "source": "yfinance_live",
+            "last_updated": datetime.now(timezone.utc).isoformat()
+        }
+        _FAST_QUOTE_CACHE[sym] = {"cached_at": now_ts, "data": quote_data}
+        return quote_data
+
+    # 3. Fallback: historical OHLCV pipeline
     df = await get_historical_ohlcv(sym, timeframe="1M")
     latest_ind = extract_latest_indicators(df)
+    _INDICATOR_SNAPSHOT_CACHE[sym] = latest_ind
     
-    current_price = latest_ind.get("close", 100.0)
+    current_price = latest_ind.get("close", meta.get("base_price", 100.0))
     recent_1d = latest_ind.get("recent_return_1d", 0.0)
     change_amt = round(current_price * (recent_1d / 100.0), 2)
     
@@ -245,11 +347,11 @@ async def get_stock_quote(symbol: str) -> Dict[str, Any]:
     low_24h = float(latest_row.get("low", current_price * 0.99))
     open_price = float(latest_row.get("open", current_price - change_amt))
 
-    return {
+    quote_data = {
         "symbol": sym,
         "name": meta.get("name", sym),
         "exchange": meta.get("exchange", "NASDAQ"),
-        "currency": meta.get("currency", "₹"),
+        "currency": currency,
         "current_price": current_price,
         "change_amount": change_amt,
         "change_percent": recent_1d,
@@ -259,16 +361,39 @@ async def get_stock_quote(symbol: str) -> Dict[str, Any]:
         "volume": volume,
         "timestamp": candle_ts,
         "indicators": latest_ind,
+        "source": "ohlcv_cache",
         "last_updated": datetime.now(timezone.utc).isoformat()
     }
+    _FAST_QUOTE_CACHE[sym] = {"cached_at": now_ts, "data": quote_data}
+    return quote_data
 
 async def get_market_overview() -> List[Dict[str, Any]]:
-    """Returns overview of all supported stocks for the Markets page."""
+    """Returns overview of all supported stocks for the Markets page concurrently in parallel."""
+    tasks = [get_stock_quote(item["symbol"]) for item in SUPPORTED_STOCKS]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
     overview = []
-    for item in SUPPORTED_STOCKS:
-        try:
-            quote = await get_stock_quote(item["symbol"])
-            overview.append(quote)
-        except Exception as e:
-            logger.error(f"Error fetching quote for {item['symbol']}: {e}")
+    for item, res in zip(SUPPORTED_STOCKS, results):
+        if isinstance(res, dict):
+            overview.append(res)
+        else:
+            logger.error(f"Error fetching quote for {item['symbol']}: {res}")
+            base_p = item.get("base_price", 100.0)
+            curr = item.get("currency", "$" if item.get("exchange") == "NASDAQ" else "₹")
+            overview.append({
+                "symbol": item["symbol"],
+                "name": item["name"],
+                "exchange": item["exchange"],
+                "currency": curr,
+                "current_price": base_p,
+                "change_amount": 0.0,
+                "change_percent": 0.0,
+                "open": base_p,
+                "high": base_p,
+                "low": base_p,
+                "volume": 1000000,
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+                "indicators": {},
+                "source": "fallback",
+                "last_updated": datetime.now(timezone.utc).isoformat()
+            })
     return overview
