@@ -12,9 +12,16 @@ class Settings:
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api"
     
-    # MongoDB (supports MONGODB_URL or MONGODB_URI)
-    MONGODB_URL: str = os.getenv("MONGODB_URL") or os.getenv("MONGODB_URI") or "mongodb://localhost:27017"
-    DATABASE_NAME: str = os.getenv("DATABASE_NAME", "trademind_ai")
+    # MongoDB (supports MONGODB_URL, MONGODB_URI, MONGO_URL, DATABASE_URL)
+    _raw_mongo = (
+        os.getenv("MONGODB_URL")
+        or os.getenv("MONGODB_URI")
+        or os.getenv("MONGO_URL")
+        or os.getenv("DATABASE_URL")
+        or "mongodb://localhost:27017"
+    ).strip().strip("'").strip('"')
+    MONGODB_URL: str = _raw_mongo
+    DATABASE_NAME: str = os.getenv("DATABASE_NAME", "trademind_ai").strip().strip("'").strip('"')
     
     # Security & JWT
     JWT_SECRET: str = os.getenv("JWT_SECRET", "trademind_ai_super_secret_jwt_key_2026_change_in_production")

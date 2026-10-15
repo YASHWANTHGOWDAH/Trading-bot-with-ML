@@ -7,6 +7,8 @@ logger = logging.getLogger("trademind.database")
 class Database:
     client: AsyncIOMotorClient = None
     db = None
+    connection_error: str = None
+    is_connected: bool = False
 
 db_instance = Database()
 
@@ -28,6 +30,8 @@ async def connect_to_mongo():
         
         # Verify connection
         await db_instance.client.admin.command('ping')
+        db_instance.is_connected = True
+        db_instance.connection_error = None
         logger.info(f"Connected successfully to MongoDB database '{settings.DATABASE_NAME}'")
         
         # Create indexes
@@ -43,8 +47,10 @@ async def connect_to_mongo():
         await get_collection("chat_messages").create_index([("user_email", 1), ("timestamp", -1)])
         logger.info("MongoDB indexes verified/created successfully.")
     except Exception as e:
-        logger.error(f"Failed to connect to MongoDB: {e}")
-        raise e
+        db_instance.is_connected = False
+        db_instance.connection_error = str(e)
+        logger.error(f"Failed to connect to MongoDB at {masked_url}: {e}")
+        logger.warning("FastAPI backend will continue running to ensure Render port detection and health endpoints stay online.")
 
 async def close_mongo_connection():
     if db_instance.client:
@@ -56,7 +62,9 @@ def get_database():
 
 def get_collection(collection_name: str):
     if db_instance.db is None:
-        # Fallback client if called before event loop lifespan
-        db_instance.client = AsyncIOMotorClient(settings.MONGODB_URL)
-        db_instance.db = db_instance.client[settings.DATABASE_NAME]
+        try:
+            db_instance.client = AsyncIOMotorClient(settings.MONGODB_URL, serverSelectionTimeoutMS=4000)
+            db_instance.db = db_instance.client[settings.DATABASE_NAME]
+        except Exception as e:
+            raise RuntimeError(f"Database currently unavailable: {e}")
     return db_instance.db[collection_name]

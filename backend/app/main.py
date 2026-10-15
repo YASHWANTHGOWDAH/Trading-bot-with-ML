@@ -67,12 +67,8 @@ async def root():
 @app.get("/health")
 @app.get("/api/health")
 async def health_check():
-    mongo_status = "connected" if db_instance.client else "disconnected"
-    try:
-        await db_instance.client.admin.command('ping')
-        mongo_ping = "healthy"
-    except Exception as e:
-        mongo_ping = f"error: {str(e)}"
+    mongo_status = "connected" if db_instance.is_connected else "disconnected"
+    mongo_ping = "healthy" if db_instance.is_connected else f"error: {db_instance.connection_error or 'disconnected'}"
         
     return {
         "status": "healthy",
