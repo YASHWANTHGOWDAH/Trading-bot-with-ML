@@ -2,6 +2,7 @@
   "name": "trademind-ai-root",
   "private": true,
   "scripts": {
-    "build": "npm --prefix frontend install && npm --prefix frontend run build && cp -r frontend/dist . 2>/dev/null || xcopy /E /I frontend\\dist dist"
+    "build": "npm --prefix frontend install && npm --prefix frontend run build && cp -r frontend/dist . 2>/dev/null || xcopy /E /I frontend\\dist dist",
+    "buil": "npm --prefix frontend install && npm --prefix frontend run build && cp -r frontend/dist . 2>/dev/null || xcopy /E /I frontend\\dist dist"
   }
 }
