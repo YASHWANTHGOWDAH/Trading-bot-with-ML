@@ -4,6 +4,7 @@ import math
 import random
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import List, Dict, Any, Optional
 import numpy as np
 import pandas as pd
@@ -46,6 +47,56 @@ SUPPORTED_STOCKS = [
 ]
 
 SYMBOL_MAP = {s["symbol"]: s for s in SUPPORTED_STOCKS}
+
+def check_market_status(exchange_or_symbol: str = "NSE") -> Dict[str, Any]:
+    """Calculates active session status for NSE and US (NASDAQ/NYSE) markets."""
+    target = exchange_or_symbol.upper()
+    is_us = target in ["NASDAQ", "NYSE", "US"] or target in [
+        "AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "NFLX", "AMD", "INTC"
+    ]
+    tz_str = "America/New_York" if is_us else "Asia/Kolkata"
+    tz = ZoneInfo(tz_str)
+    local_now = datetime.now(tz)
+    weekday = local_now.weekday()  # 0=Monday, 6=Sunday
+    is_weekend = weekday >= 5
+    total_minutes = local_now.hour * 60 + local_now.minute
+
+    # Regular trading hours (minutes from midnight):
+    # NSE: 9:15 AM - 3:30 PM (555 to 930)
+    # US: 9:30 AM - 4:00 PM (570 to 960)
+    open_min = 570 if is_us else 555
+    close_min = 960 if is_us else 930
+    is_open = (not is_weekend) and (open_min <= total_minutes < close_min)
+    exchange_name = "NASDAQ" if is_us else "NSE"
+    session_open_str = "9:30 AM ET" if is_us else "9:15 AM IST"
+
+    if is_open:
+        mins_left = close_min - total_minutes
+        h, m = mins_left // 60, mins_left % 60
+        h_str = f"{h}h " if h > 0 else ""
+        detail = f"Closes in {h_str}{m}m ({exchange_name})"
+    elif is_weekend:
+        detail = f"Weekend • Opens Mon {session_open_str}"
+    elif total_minutes < open_min:
+        mins_left = open_min - total_minutes
+        h, m = mins_left // 60, mins_left % 60
+        h_str = f"{h}h " if h > 0 else ""
+        detail = f"Opens in {h_str}{m}m ({session_open_str})"
+    else:
+        next_day = "Mon" if weekday == 4 else "Tomorrow"
+        detail = f"Closed for day • Opens {next_day} {session_open_str}"
+
+    return {
+        "is_open": is_open,
+        "isOpen": is_open,
+        "status": "OPEN" if is_open else "CLOSED",
+        "badge": "OPEN" if is_open else "CLOSED",
+        "exchange": exchange_name,
+        "exchangeName": exchange_name,
+        "detail": detail,
+        "local_time": local_now.strftime("%H:%M %Z"),
+        "localTime": local_now.strftime("%H:%M %Z")
+    }
 
 def generate_synthetic_ohlcv(symbol: str, timeframe: str = "1M") -> pd.DataFrame:
     """
@@ -354,6 +405,7 @@ async def get_stock_quote(symbol: str, force_refresh: bool = False) -> Dict[str,
             "volume": fast_data["volume"],
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
             "indicators": indicators,
+            "market_status": check_market_status(meta.get("exchange", "NASDAQ")),
             "source": "yfinance_live",
             "last_updated": datetime.now(timezone.utc).isoformat()
         }
@@ -391,6 +443,7 @@ async def get_stock_quote(symbol: str, force_refresh: bool = False) -> Dict[str,
         "volume": volume,
         "timestamp": candle_ts,
         "indicators": latest_ind,
+        "market_status": check_market_status(meta.get("exchange", "NASDAQ")),
         "source": "ohlcv_cache",
         "last_updated": datetime.now(timezone.utc).isoformat()
     }

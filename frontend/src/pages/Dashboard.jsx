@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   TrendingUp,
@@ -19,6 +19,76 @@ import {
 import StockChart from '../charts/StockChart';
 import AIChartBox from '../components/AIChartBox';
 import { marketService, aiService, paperService, portfolioService } from '../services/api';
+
+const US_STOCKS = new Set([
+  'AAPL', 'NVDA', 'MSFT', 'TSLA', 'AMZN', 'GOOGL', 'META', 'NFLX', 'AMD', 'INTC'
+]);
+
+export function getMarketStatus(exchange = 'NSE') {
+  const isUS = exchange === 'NASDAQ' || exchange === 'NYSE' || exchange === 'US';
+  const timeZone = isUS ? 'America/New_York' : 'Asia/Kolkata';
+  const exchangeName = isUS ? 'NASDAQ' : 'NSE';
+
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'short',
+    hour: 'numeric',
+    minute: 'numeric',
+    hourCycle: 'h23',
+  });
+
+  const parts = formatter.formatToParts(now);
+  const getPart = (type) => parts.find((p) => p.type === type)?.value;
+
+  const weekday = getPart('weekday'); // 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'
+  const hour = parseInt(getPart('hour') || '0', 10);
+  const minute = parseInt(getPart('minute') || '0', 10);
+  const totalMinutes = hour * 60 + minute;
+
+  const isWeekend = weekday === 'Sat' || weekday === 'Sun';
+
+  // Regular trading sessions (minutes from midnight):
+  // NSE: 9:15 AM (555) to 3:30 PM (930) IST
+  // US:  9:30 AM (570) to 4:00 PM (960) ET
+  const openMinutes = isUS ? (9 * 60 + 30) : (9 * 60 + 15);
+  const closeMinutes = isUS ? (16 * 60) : (15 * 60 + 30);
+
+  const isOpen = !isWeekend && totalMinutes >= openMinutes && totalMinutes < closeMinutes;
+  const badge = isOpen ? 'OPEN' : 'CLOSED';
+  let detail = '';
+
+  if (isOpen) {
+    const minsToClose = closeMinutes - totalMinutes;
+    const hrs = Math.floor(minsToClose / 60);
+    const mins = minsToClose % 60;
+    detail = `Closes in ${hrs > 0 ? `${hrs}h ` : ''}${mins}m (${exchangeName})`;
+  } else if (isWeekend) {
+    detail = `Weekend • Opens Mon ${isUS ? '9:30 AM ET' : '9:15 AM IST'}`;
+  } else if (totalMinutes < openMinutes) {
+    const minsToOpen = openMinutes - totalMinutes;
+    const hrs = Math.floor(minsToOpen / 60);
+    const mins = minsToOpen % 60;
+    detail = `Opens in ${hrs > 0 ? `${hrs}h ` : ''}${mins}m (${isUS ? '9:30 AM ET' : '9:15 AM IST'})`;
+  } else {
+    const nextDay = weekday === 'Fri' ? 'Mon' : 'Tomorrow';
+    detail = `Closed for day • Opens ${nextDay} ${isUS ? '9:30 AM ET' : '9:15 AM IST'}`;
+  }
+
+  const localTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} ${isUS ? 'ET' : 'IST'}`;
+
+  return {
+    isOpen,
+    is_open: isOpen,
+    badge,
+    status: badge,
+    exchangeName,
+    exchange: exchangeName,
+    detail,
+    localTime,
+    local_time: localTime,
+  };
+}
 
 const DEFAULT_STOCKS = [
   // US Tech & Global Leaders
@@ -64,6 +134,19 @@ export default function Dashboard({ user, portfolio, onTradeComplete }) {
   const [isRefreshingQuote, setIsRefreshingQuote] = useState(false);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [lastUpdatedTime, setLastUpdatedTime] = useState(null);
+  
+  // Real-time market status clock (re-evaluates status every 15s)
+  const [marketClock, setMarketClock] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setMarketClock(Date.now()), 15000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const currentExchange = quote?.exchange || (US_STOCKS.has(selectedSymbol) ? 'NASDAQ' : 'NSE');
+  const marketStatus = useMemo(
+    () => quote?.market_status || getMarketStatus(currentExchange),
+    [quote?.market_status, currentExchange, marketClock]
+  );
   
   // Quick trade modal/card state
   const [tradeAction, setTradeAction] = useState('BUY');
@@ -236,17 +319,37 @@ export default function Dashboard({ user, portfolio, onTradeComplete }) {
         {/* Market Status */}
         <div className="glass-card" style={{ padding: '18px 20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>Market Status</span>
-            <div style={{ color: '#a855f7', background: 'rgba(168, 85, 247, 0.1)', padding: '6px', borderRadius: '8px' }}>
+            <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>
+              Market Status ({marketStatus.exchangeName})
+            </span>
+            <div style={{
+              color: marketStatus.isOpen ? '#10b981' : '#f59e0b',
+              background: marketStatus.isOpen ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+              padding: '6px',
+              borderRadius: '8px'
+            }}>
               <Activity size={16} />
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '18px', fontWeight: 700, color: '#f8fafc' }}>
-            <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#10b981', boxShadow: '0 0 10px #10b981' }} />
-            OPEN (Active)
+            <span
+              style={{
+                width: '10px',
+                height: '10px',
+                borderRadius: '50%',
+                background: marketStatus.isOpen ? '#10b981' : '#ef4444',
+                boxShadow: marketStatus.isOpen ? '0 0 10px #10b981' : '0 0 10px rgba(239, 68, 68, 0.6)'
+              }}
+            />
+            <span style={{ color: marketStatus.isOpen ? '#10b981' : '#f87171' }}>
+              {marketStatus.badge}
+            </span>
+            <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 500, marginLeft: 'auto' }}>
+              {marketStatus.localTime}
+            </span>
           </div>
-          <div style={{ fontSize: '11px', color: '#64748b', marginTop: '6px' }}>
-            Real-time demo stream
+          <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px' }}>
+            {marketStatus.detail}
           </div>
         </div>
 

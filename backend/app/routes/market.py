@@ -7,6 +7,7 @@ from app.services.market_data import (
     get_stock_quote,
     get_historical_ohlcv,
     get_market_overview,
+    check_market_status,
     _clean_json_floats
 )
 
@@ -23,6 +24,12 @@ async def get_overview():
     """Returns quotes and signals for all stocks in the universe."""
     data = await get_market_overview()
     return {"stocks": data}
+
+@router.get("/status")
+@router.get("/status/{exchange_or_symbol}")
+async def get_market_status_route(exchange_or_symbol: str = "NSE"):
+    """Returns real-time open/closed status for NSE or US/NASDAQ markets."""
+    return check_market_status(exchange_or_symbol)
 
 @router.get("/{symbol}")
 @router.get("/{symbol}/summary")
