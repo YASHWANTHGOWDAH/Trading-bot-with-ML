@@ -140,34 +140,23 @@ export default function StockChart({
 
   const yPadding = (maxPrice - minPrice) * 0.08 || 5;
 
-  const formatCompactVolume = (vol) => {
-    if (!vol || isNaN(vol)) return null;
-    const num = Number(vol);
-    if (num >= 1e9) return (num / 1e9).toFixed(2) + 'B';
-    if (num >= 1e6) return (num / 1e6).toFixed(2) + 'M';
-    if (num >= 1e3) return (num / 1e3).toFixed(1) + 'K';
-    return num.toLocaleString();
-  };
-
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       const pData = payload[0].payload;
       const isUp = pData.close >= pData.open;
       const chgColor = isUp ? '#10b981' : '#ef4444';
-      const volStr = formatCompactVolume(pData.volume);
 
       return (
         <div style={{
           background: 'rgba(15, 23, 42, 0.94)',
           backdropFilter: 'blur(10px)',
           border: '1px solid rgba(255, 255, 255, 0.12)',
-          padding: '10px 14px',
+          padding: '8px 12px',
           borderRadius: '10px',
           boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
           color: '#f8fafc',
-          fontSize: '12px',
-          minWidth: '170px',
-          pointerEvents: 'none'
+          pointerEvents: 'none',
+          whiteSpace: 'nowrap'
         }}>
           {/* Header: Date + Change Badge */}
           <div style={{
@@ -192,27 +181,9 @@ export default function StockChart({
             </span>
           </div>
 
-          {/* Featured Price: Close */}
-          <div style={{ fontSize: '18px', fontWeight: 800, color: '#f8fafc', marginBottom: '6px' }}>
+          {/* Featured Price */}
+          <div style={{ fontSize: '18px', fontWeight: 800, color: '#f8fafc', letterSpacing: '-0.3px' }}>
             {currency}{pData.close?.toFixed(2)}
-          </div>
-
-          {/* Clean Single-Row Stats (TradingView / Yahoo Finance style) */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            fontSize: '11px',
-            color: '#94a3b8',
-            borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-            paddingTop: '6px'
-          }}>
-            <span><span style={{ color: '#64748b' }}>O:</span> <strong style={{ color: '#cbd5e1' }}>{currency}{pData.open?.toFixed(2)}</strong></span>
-            <span><span style={{ color: '#64748b' }}>H:</span> <strong style={{ color: '#10b981' }}>{currency}{pData.high?.toFixed(2)}</strong></span>
-            <span><span style={{ color: '#64748b' }}>L:</span> <strong style={{ color: '#ef4444' }}>{currency}{pData.low?.toFixed(2)}</strong></span>
-            {volStr && (
-              <span style={{ marginLeft: 'auto' }}><span style={{ color: '#64748b' }}>Vol:</span> <strong style={{ color: '#cbd5e1' }}>{volStr}</strong></span>
-            )}
           </div>
         </div>
       );
