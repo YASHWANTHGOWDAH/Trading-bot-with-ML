@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 import random
 import time
 from datetime import datetime, timedelta, timezone
@@ -233,6 +234,16 @@ _FAST_QUOTE_CACHE: Dict[str, Dict[str, Any]] = {}
 _INDICATOR_SNAPSHOT_CACHE: Dict[str, Dict[str, Any]] = {}
 FAST_QUOTE_CACHE_TTL = 3.5  # 3.5 seconds cache TTL
 
+def _clean_json_floats(obj: Any) -> Any:
+    """Recursively converts nan or inf floats to 0.0 to guarantee standard JSON compliance."""
+    if isinstance(obj, float):
+        return 0.0 if (math.isnan(obj) or math.isinf(obj)) else obj
+    if isinstance(obj, dict):
+        return {k: _clean_json_floats(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_clean_json_floats(v) for v in obj]
+    return obj
+
 def _fetch_fast_info_sync(yf_symbol: str) -> Optional[Dict[str, Any]]:
     """Synchronous worker that queries yfinance fast_info in a background worker thread."""
     try:
@@ -328,8 +339,9 @@ async def get_stock_quote(symbol: str, force_refresh: bool = False) -> Dict[str,
             "source": "yfinance_live",
             "last_updated": datetime.now(timezone.utc).isoformat()
         }
-        _FAST_QUOTE_CACHE[sym] = {"cached_at": now_ts, "data": quote_data}
-        return quote_data
+        cleaned_quote = _clean_json_floats(quote_data)
+        _FAST_QUOTE_CACHE[sym] = {"cached_at": now_ts, "data": cleaned_quote}
+        return cleaned_quote
 
     # 3. Fallback: historical OHLCV pipeline
     df = await get_historical_ohlcv(sym, timeframe="1M")
@@ -364,8 +376,9 @@ async def get_stock_quote(symbol: str, force_refresh: bool = False) -> Dict[str,
         "source": "ohlcv_cache",
         "last_updated": datetime.now(timezone.utc).isoformat()
     }
-    _FAST_QUOTE_CACHE[sym] = {"cached_at": now_ts, "data": quote_data}
-    return quote_data
+    cleaned_fallback = _clean_json_floats(quote_data)
+    _FAST_QUOTE_CACHE[sym] = {"cached_at": now_ts, "data": cleaned_fallback}
+    return cleaned_fallback
 
 async def get_market_overview() -> List[Dict[str, Any]]:
     """Returns overview of all supported stocks for the Markets page concurrently in parallel."""

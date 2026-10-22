@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import pandas as pd
 from typing import Dict, Any
@@ -44,20 +45,21 @@ def calculate_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # Ensure column names are lowercase
     data.columns = [c.lower() for c in data.columns]
     
-    close = data['close']
+    close = data['close'].ffill().bfill().fillna(100.0)
+    data['close'] = close
     
     # Simple Moving Averages
-    data['sma20'] = close.rolling(window=20, min_periods=1).mean()
-    data['sma50'] = close.rolling(window=50, min_periods=1).mean()
+    data['sma20'] = close.rolling(window=20, min_periods=1).mean().fillna(close)
+    data['sma50'] = close.rolling(window=50, min_periods=1).mean().fillna(close)
     
     # RSI (14)
     data['rsi'] = compute_rsi(close, period=14)
     
     # MACD (12, 26, 9)
     macd_dict = compute_macd(close, fast=12, slow=26, signal=9)
-    data['macd'] = macd_dict['macd']
-    data['macd_signal'] = macd_dict['macd_signal']
-    data['macd_hist'] = macd_dict['macd_hist']
+    data['macd'] = macd_dict['macd'].fillna(0.0)
+    data['macd_signal'] = macd_dict['macd_signal'].fillna(0.0)
+    data['macd_hist'] = macd_dict['macd_hist'].fillna(0.0)
     
     # Returns
     data['recent_return_1d'] = close.pct_change(1).fillna(0.0) * 100.0
@@ -75,21 +77,31 @@ def extract_latest_indicators(df: pd.DataFrame) -> Dict[str, Any]:
     """Extract latest calculated indicator values for UI cards and explainability."""
     if df.empty:
         return {}
+        
+    def _clean(val, default=0.0):
+        try:
+            f = float(val)
+            if math.isnan(f) or math.isinf(f):
+                return default
+            return f
+        except Exception:
+            return default
+
+    # Forward fill to ensure no trailing NaNs
+    clean_df = df.ffill().bfill().fillna(0.0)
+    latest = clean_df.iloc[-1]
     
-    latest = df.iloc[-1]
-    prev = df.iloc[-2] if len(df) > 1 else latest
-    
-    close = float(latest.get('close', 0.0))
-    sma20 = float(latest.get('sma20', close))
-    sma50 = float(latest.get('sma50', close))
-    rsi = float(latest.get('rsi', 50.0))
-    macd = float(latest.get('macd', 0.0))
-    macd_signal = float(latest.get('macd_signal', 0.0))
-    macd_hist = float(latest.get('macd_hist', 0.0))
-    return_1d = float(latest.get('recent_return_1d', 0.0))
-    return_5d = float(latest.get('recent_return_5d', 0.0))
-    volatility = float(latest.get('volatility', 1.0))
-    sma_gap = float(latest.get('sma_gap', 0.0))
+    close = _clean(latest.get('close', 100.0), 100.0)
+    sma20 = _clean(latest.get('sma20', close), close)
+    sma50 = _clean(latest.get('sma50', close), close)
+    rsi = _clean(latest.get('rsi', 50.0), 50.0)
+    macd = _clean(latest.get('macd', 0.0), 0.0)
+    macd_signal = _clean(latest.get('macd_signal', 0.0), 0.0)
+    macd_hist = _clean(latest.get('macd_hist', 0.0), 0.0)
+    return_1d = _clean(latest.get('recent_return_1d', 0.0), 0.0)
+    return_5d = _clean(latest.get('recent_return_5d', 0.0), 0.0)
+    volatility = _clean(latest.get('volatility', 1.0), 1.0)
+    sma_gap = _clean(latest.get('sma_gap', 0.0), 0.0)
     
     return {
         "close": round(close, 2),
