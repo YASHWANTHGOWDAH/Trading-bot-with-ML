@@ -163,6 +163,16 @@ def fetch_yfinance_ohlcv(symbol: str, timeframe: str = "1M") -> Optional[pd.Data
             return None
         
         hist = hist.reset_index()
+        # Drop rows where Close is missing
+        hist = hist.dropna(subset=['Close'])
+        if hist.empty or len(hist) < 3:
+            return None
+            
+        hist['Open'] = hist['Open'].fillna(hist['Close'])
+        hist['High'] = hist['High'].fillna(hist['Close'])
+        hist['Low'] = hist['Low'].fillna(hist['Close'])
+        hist['Volume'] = hist['Volume'].fillna(1000000)
+        
         # Handle Date or Datetime column
         date_col = 'Datetime' if 'Datetime' in hist.columns else ('Date' if 'Date' in hist.columns else hist.columns[0])
         
@@ -173,14 +183,20 @@ def fetch_yfinance_ohlcv(symbol: str, timeframe: str = "1M") -> Optional[pd.Data
                 ts_str = dt_val.strftime("%Y-%m-%d %H:%M" if timeframe in ["1D", "1W"] else "%Y-%m-%d")
             else:
                 ts_str = str(dt_val)[:16]
+            
+            c_val = float(row['Close']) if (not pd.isna(row['Close']) and not math.isnan(float(row['Close']))) else 100.0
+            o_val = float(row['Open']) if (not pd.isna(row['Open']) and not math.isnan(float(row['Open']))) else c_val
+            h_val = float(row['High']) if (not pd.isna(row['High']) and not math.isnan(float(row['High']))) else max(c_val, o_val)
+            l_val = float(row['Low']) if (not pd.isna(row['Low']) and not math.isnan(float(row['Low']))) else min(c_val, o_val)
+            v_val = int(row['Volume']) if (not pd.isna(row['Volume']) and not math.isnan(float(row['Volume']))) else 1000000
                 
             records.append({
                 "timestamp": ts_str,
-                "open": round(float(row['Open']), 2),
-                "high": round(float(row['High']), 2),
-                "low": round(float(row['Low']), 2),
-                "close": round(float(row['Close']), 2),
-                "volume": int(row['Volume'])
+                "open": round(o_val, 2),
+                "high": round(h_val, 2),
+                "low": round(l_val, 2),
+                "close": round(c_val, 2),
+                "volume": v_val
             })
         return pd.DataFrame(records)
     except Exception as e:
@@ -204,18 +220,20 @@ async def get_historical_ohlcv(symbol: str, timeframe: str = "1M", force_refresh
         max_age_seconds = 60 if timeframe == "1D" else (120 if timeframe == "1W" else 300)
         if updated_at and (now - updated_at.replace(tzinfo=timezone.utc)).total_seconds() < max_age_seconds:
             df = pd.DataFrame(cached["data"])
-            return calculate_technical_indicators(df)
+            df = df.ffill().bfill().fillna(0.0)
+            return calculate_technical_indicators(df).ffill().bfill().fillna(0.0)
             
     # 2. Try fetching live from yfinance (run in thread pool to prevent blocking async loop)
     df = await asyncio.to_thread(fetch_yfinance_ohlcv, sym, timeframe)
     if df is None or df.empty or len(df) < 5:
         df = generate_synthetic_ohlcv(sym, timeframe)
         
-    # 3. Calculate indicators
+    # 3. Calculate indicators and ensure no residual NaNs
     df_with_ind = calculate_technical_indicators(df)
+    df_with_ind = df_with_ind.ffill().bfill().fillna(0.0)
     
-    # 4. Save into MongoDB market_data collection
-    records = df_with_ind.to_dict(orient="records")
+    # 4. Save clean records into MongoDB market_data collection
+    records = _clean_json_floats(df_with_ind.to_dict(orient="records"))
     await col.update_one(
         {"symbol": sym, "timeframe": timeframe},
         {"$set": {
@@ -227,7 +245,7 @@ async def get_historical_ohlcv(symbol: str, timeframe: str = "1M", force_refresh
         upsert=True
     )
     
-    return df_with_ind
+    return pd.DataFrame(records)
 
 # Ultra-fast in-memory quote caching for sub-second responses
 _FAST_QUOTE_CACHE: Dict[str, Dict[str, Any]] = {}

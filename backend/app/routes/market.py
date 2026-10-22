@@ -6,7 +6,8 @@ from app.services.market_data import (
     SYMBOL_MAP,
     get_stock_quote,
     get_historical_ohlcv,
-    get_market_overview
+    get_market_overview,
+    _clean_json_floats
 )
 
 logger = logging.getLogger("trademind.routes.market")
@@ -54,12 +55,14 @@ async def get_history(
     sym = symbol.upper()
     try:
         df = await get_historical_ohlcv(sym, timeframe=timeframe, force_refresh=refresh)
-        records = df.to_dict(orient="records")
+        df_clean = df.ffill().bfill().fillna(0.0)
+        records = df_clean.to_dict(orient="records")
+        cleaned_records = _clean_json_floats(records)
         return {
             "symbol": sym,
             "timeframe": timeframe,
-            "total_bars": len(records),
-            "candles": records
+            "total_bars": len(cleaned_records),
+            "candles": cleaned_records
         }
     except Exception as e:
         logger.error(f"Error fetching historical data for {sym}: {e}")
