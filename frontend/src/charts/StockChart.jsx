@@ -140,55 +140,80 @@ export default function StockChart({
 
   const yPadding = (maxPrice - minPrice) * 0.08 || 5;
 
+  const formatCompactVolume = (vol) => {
+    if (!vol || isNaN(vol)) return null;
+    const num = Number(vol);
+    if (num >= 1e9) return (num / 1e9).toFixed(2) + 'B';
+    if (num >= 1e6) return (num / 1e6).toFixed(2) + 'M';
+    if (num >= 1e3) return (num / 1e3).toFixed(1) + 'K';
+    return num.toLocaleString();
+  };
+
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       const pData = payload[0].payload;
       const isUp = pData.close >= pData.open;
+      const chgColor = isUp ? '#10b981' : '#ef4444';
+      const volStr = formatCompactVolume(pData.volume);
+
       return (
         <div style={{
-          background: 'rgba(15, 23, 42, 0.95)',
-          border: '1px solid rgba(255, 255, 255, 0.15)',
-          padding: '12px 16px',
-          borderRadius: '12px',
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+          background: 'rgba(15, 23, 42, 0.94)',
+          backdropFilter: 'blur(10px)',
+          border: '1px solid rgba(255, 255, 255, 0.12)',
+          padding: '10px 14px',
+          borderRadius: '10px',
+          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
           color: '#f8fafc',
           fontSize: '12px',
-          minWidth: '200px'
+          minWidth: '170px',
+          pointerEvents: 'none'
         }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '4px' }}>
-            <span style={{ fontWeight: 700, color: '#94a3b8' }}>{pData.timestamp || label}</span>
+          {/* Header: Date + Change Badge */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '12px',
+            marginBottom: '4px'
+          }}>
+            <span style={{ fontWeight: 600, color: '#94a3b8', fontSize: '11px' }}>
+              {pData.timestamp || label}
+            </span>
             <span style={{
               fontSize: '11px',
               fontWeight: 700,
               padding: '1px 6px',
               borderRadius: '4px',
               background: isUp ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-              color: isUp ? '#10b981' : '#ef4444'
+              color: chgColor
             }}>
               {isUp ? '+' : ''}{pData.changePct ? pData.changePct.toFixed(2) : '0.00'}%
             </span>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', marginBottom: '8px' }}>
-            <div><span style={{ color: '#64748b' }}>Open: </span><strong>{currency}{pData.open?.toFixed(2)}</strong></div>
-            <div><span style={{ color: '#64748b' }}>High: </span><strong style={{ color: '#10b981' }}>{currency}{pData.high?.toFixed(2)}</strong></div>
-            <div><span style={{ color: '#64748b' }}>Low: </span><strong style={{ color: '#ef4444' }}>{currency}{pData.low?.toFixed(2)}</strong></div>
-            <div><span style={{ color: '#64748b' }}>Close: </span><strong style={{ color: '#38bdf8' }}>{currency}{pData.close?.toFixed(2)}</strong></div>
+          {/* Featured Price: Close */}
+          <div style={{ fontSize: '18px', fontWeight: 800, color: '#f8fafc', marginBottom: '6px' }}>
+            {currency}{pData.close?.toFixed(2)}
           </div>
 
-          {(pData.sma20 || pData.sma50) && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '6px', marginBottom: '4px' }}>
-              {pData.sma20 && <div><span style={{ color: '#fbbf24' }}>SMA20: </span>{currency}{pData.sma20?.toFixed(2)}</div>}
-              {pData.sma50 && <div><span style={{ color: '#c084fc' }}>SMA50: </span>{currency}{pData.sma50?.toFixed(2)}</div>}
-            </div>
-          )}
-
-          {pData.volume && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '4px' }}>
-              <span style={{ color: '#64748b' }}>Volume:</span>
-              <span style={{ fontWeight: 600, color: '#cbd5e1' }}>{Number(pData.volume).toLocaleString()}</span>
-            </div>
-          )}
+          {/* Clean Single-Row Stats (TradingView / Yahoo Finance style) */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            fontSize: '11px',
+            color: '#94a3b8',
+            borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+            paddingTop: '6px'
+          }}>
+            <span><span style={{ color: '#64748b' }}>O:</span> <strong style={{ color: '#cbd5e1' }}>{currency}{pData.open?.toFixed(2)}</strong></span>
+            <span><span style={{ color: '#64748b' }}>H:</span> <strong style={{ color: '#10b981' }}>{currency}{pData.high?.toFixed(2)}</strong></span>
+            <span><span style={{ color: '#64748b' }}>L:</span> <strong style={{ color: '#ef4444' }}>{currency}{pData.low?.toFixed(2)}</strong></span>
+            {volStr && (
+              <span style={{ marginLeft: 'auto' }}><span style={{ color: '#64748b' }}>Vol:</span> <strong style={{ color: '#cbd5e1' }}>{volStr}</strong></span>
+            )}
+          </div>
         </div>
       );
     }
