@@ -1,14 +1,19 @@
 import os
 import re
+import shutil
 import subprocess
 import markdown
 
 DOCS_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(DOCS_DIR)
+FRONTEND_PUBLIC = os.path.join(PROJECT_ROOT, "frontend", "public")
+DOWNLOADS_DIR = os.path.join(os.path.expanduser("~"), "Downloads")
+
 MD_PATH = os.path.join(DOCS_DIR, "FINAL_PROJECT_REPORT_BIS786.md")
 HTML_FULL_PATH = os.path.join(DOCS_DIR, "report_full.html")
 PDF_FULL_PATH = os.path.join(DOCS_DIR, "FINAL_PROJECT_REPORT_BIS786.pdf")
 HTML_PLAG_PATH = os.path.join(DOCS_DIR, "report_plagiarism_only.html")
-PDF_PLAG_PATH = os.path.join(DOCS_DIR, "PLAGIARISM_CHECK_CHAPTERS_1_TO_7.pdf")
+PDF_PLAG_PATH = os.path.join(DOCS_DIR, "PLAGIARISM_CHECK_CHAPTERS_1_TO_8.pdf")
 
 CHROME_PATH = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 if not os.path.exists(CHROME_PATH):
@@ -20,23 +25,52 @@ with open(MD_PATH, "r", encoding="utf-8") as f:
     full_markdown_text = f.read()
 
 # Custom CSS matching VTU and Sai Vidya Institute of Technology formatting
+# Includes exact headers/footers:
+# Header: Intelligent Trading Bot with Real-Time Market Data Analysis | BIS786
+# Footer: Dept. of IS&E, SVIT | Page number
 REPORT_CSS = """
 @page {
     size: A4 portrait;
     margin-left: 31mm;
     margin-right: 25mm;
-    margin-top: 20mm;
-    margin-bottom: 20mm;
-}
-
-@page :left {
-    margin-left: 31mm;
-    margin-right: 25mm;
-}
-
-@page :right {
-    margin-left: 31mm;
-    margin-right: 25mm;
+    margin-top: 25mm;
+    margin-bottom: 25mm;
+    
+    @top-left {
+        content: "Intelligent Trading Bot with Real-Time Market Data Analysis";
+        font-family: 'Times New Roman', Times, serif;
+        font-size: 8.5pt;
+        color: #4b5563;
+        font-style: italic;
+        border-bottom: 0.5pt solid #cbd5e1;
+        padding-bottom: 3pt;
+    }
+    @top-right {
+        content: "BIS786";
+        font-family: 'Times New Roman', Times, serif;
+        font-size: 8.5pt;
+        color: #4b5563;
+        font-weight: bold;
+        border-bottom: 0.5pt solid #cbd5e1;
+        padding-bottom: 3pt;
+    }
+    @bottom-left {
+        content: "Dept. of IS&E, SVIT";
+        font-family: 'Times New Roman', Times, serif;
+        font-size: 8.5pt;
+        color: #4b5563;
+        font-weight: bold;
+        border-top: 0.5pt solid #cbd5e1;
+        padding-top: 3pt;
+    }
+    @bottom-right {
+        content: counter(page);
+        font-family: 'Times New Roman', Times, serif;
+        font-size: 8.5pt;
+        color: #4b5563;
+        border-top: 0.5pt solid #cbd5e1;
+        padding-top: 3pt;
+    }
 }
 
 *, *:before, *:after {
@@ -64,7 +98,7 @@ p {
 
 h1 {
     font-family: 'Times New Roman', Times, serif;
-    font-size: 16pt;
+    font-size: 15pt;
     font-weight: bold;
     text-align: center;
     text-transform: uppercase;
@@ -76,7 +110,7 @@ h1 {
 
 h2 {
     font-family: 'Times New Roman', Times, serif;
-    font-size: 14pt;
+    font-size: 13.5pt;
     font-weight: bold;
     margin-top: 16pt;
     margin-bottom: 8pt;
@@ -198,31 +232,6 @@ hr {
     text-align: right;
 }
 
-/* Front sheet certificate styling */
-.front-title {
-    font-size: 18pt;
-    font-weight: bold;
-    text-transform: uppercase;
-    text-align: center;
-    margin: 10pt 0;
-    line-height: 1.3;
-}
-
-.front-subtitle {
-    font-size: 13pt;
-    font-weight: bold;
-    text-align: center;
-    margin: 6pt 0;
-}
-
-.front-college {
-    font-size: 16pt;
-    font-weight: bold;
-    color: #1e3a8a;
-    text-align: center;
-    margin: 4pt 0;
-}
-
 .mermaid {
     text-align: center;
     margin: 14pt 0;
@@ -234,7 +243,7 @@ def markdown_to_styled_html(md_text, is_plagiarism_only=False):
     # Convert page breaks in markdown
     md_formatted = md_text.replace('<div style="page-break-after: always;"></div>', '<div class="page-break"></div>')
     
-    # Pre-render mermaid code blocks as <pre class="mermaid">
+    # Pre-render mermaid code blocks as <div class="mermaid">
     def replace_mermaid(match):
         code = match.group(1).strip()
         return f'<div class="mermaid">\n{code}\n</div>'
@@ -245,18 +254,18 @@ def markdown_to_styled_html(md_text, is_plagiarism_only=False):
     md_extensions = ['tables', 'fenced_code', 'codehilite', 'sane_lists']
     html_body = markdown.markdown(md_formatted, extensions=md_extensions)
     
-    # Add page breaks before each chapter
-    for ch_num in range(1, 8):
+    # Add page breaks before each chapter (Chapters 1 to 8)
+    for ch_num in range(1, 9):
         h1_tag = f"<h1>CHAPTER {ch_num}:"
         html_body = html_body.replace(h1_tag, f'<div class="page-break"></div>\n{h1_tag}')
         
     # Add page break before references and appendices
-    html_body = html_body.replace("<h1>REFERENCES</h1>", '<div class="page-break"></div>\n<h1>REFERENCES</h1>')
+    html_body = html_body.replace("<h1>REFERENCES", '<div class="page-break"></div>\n<h1>REFERENCES')
     html_body = html_body.replace("<h1>APPENDIX A:", '<div class="page-break"></div>\n<h1>APPENDIX A:')
     html_body = html_body.replace("<h1>APPENDIX B:", '<div class="page-break"></div>\n<h1>APPENDIX B:')
     html_body = html_body.replace("<h1>PLAGIARISM VERIFICATION", '<div class="page-break"></div>\n<h1>PLAGIARISM VERIFICATION')
 
-    doc_title = "Plagiarism Check Chapters 1-7 - TradeMind AI" if is_plagiarism_only else "Major Project Phase-II Final Report (BIS786) - TradeMind AI"
+    doc_title = "Plagiarism Check Chapters 1-8 - Intelligent Trading Bot (BIS786)" if is_plagiarism_only else "Major Project Phase-II Final Report (BIS786) - Intelligent Trading Bot"
 
     full_html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -292,20 +301,20 @@ with open(HTML_FULL_PATH, "w", encoding="utf-8") as f:
     f.write(full_html_content)
 print(f"Full Report HTML written to: {HTML_FULL_PATH}")
 
-# 2. Extract Chapters 1 to 7 for Plagiarism Check Document
-print("Extracting Chapters 1 to 7 for Plagiarism Verification...")
-# Find start of Chapter 1
+# 2. Extract Chapters 1 to 8 for Plagiarism Check Document
+print("Extracting Chapters 1 to 8 for Plagiarism Verification...")
 ch1_start = full_markdown_text.find("# CHAPTER 1: INTRODUCTION")
-# Find end of Chapter 7 / start of References
 ref_start = full_markdown_text.find("# REFERENCES")
 
 if ch1_start != -1 and ref_start != -1:
     plag_text = full_markdown_text[ch1_start:ref_start].strip()
-    # Add a minimal clean header for the plagiarism submission
-    plagiarism_header = """# TRADEMIND AI: EXPLAINABLE MACHINE LEARNING-BASED REAL-TIME MARKET ANALYTICS AND PAPER TRADING PLATFORM
-### Project Phase-II (BIS786) Report — Chapters 1 to 7 (Plagiarism Verification File)
-**Author(s):** Yashwanth Gowda H (1SV21IS058), Dept. of ISE, Sai Vidya Institute of Technology, Bengaluru  
-**Academic Year:** 2026–2027 | Visvesvaraya Technological University (VTU)
+    plagiarism_header = """# INTELLIGENT TRADING BOT WITH REAL-TIME MARKET DATA ANALYSIS
+### Project Phase-II (BIS786) Report — Chapters 1 to 8 (Plagiarism Verification File)
+**Department:** Dept. of IS&E, SVIT  
+**Institution:** Sai Vidya Institute of Technology, Rajanukunte, Bengaluru – 560 064  
+**Affiliation:** Visvesvaraya Technological University (VTU), Belagavi  
+**Candidate(s):** Yashwanth Gowda H (1SV21IS058), Team Member 2, Team Member 3, Team Member 4  
+**Academic Year:** 2026–2027
 
 ---
 
@@ -316,7 +325,7 @@ if ch1_start != -1 and ref_start != -1:
         f.write(plag_html_content)
     print(f"Plagiarism HTML written to: {HTML_PLAG_PATH}")
 else:
-    print("WARNING: Could not delimit Chapters 1-7 cleanly.")
+    print("WARNING: Could not delimit Chapters 1-8 cleanly.")
 
 # 3. Compile PDFs using Headless Chrome
 def print_html_to_pdf(html_file, pdf_file):
@@ -345,7 +354,30 @@ def print_html_to_pdf(html_file, pdf_file):
 # Generate Full Report PDF
 success_full = print_html_to_pdf(HTML_FULL_PATH, PDF_FULL_PATH)
 
-# Generate Plagiarism Chapters 1-7 PDF
+# Generate Plagiarism Chapters 1-8 PDF
 success_plag = print_html_to_pdf(HTML_PLAG_PATH, PDF_PLAG_PATH)
 
-print("PDF Build Process Complete.")
+# 4. Copy to Downloads directory and Frontend Public directory for 1-click download
+if success_full:
+    # Copy to user's Windows Downloads folder
+    dl_full = os.path.join(DOWNLOADS_DIR, "FINAL_PROJECT_REPORT_BIS786.pdf")
+    shutil.copyfile(PDF_FULL_PATH, dl_full)
+    print(f"Copied full report PDF to: {dl_full}")
+
+    # Copy to frontend public folder
+    fe_full = os.path.join(FRONTEND_PUBLIC, "FINAL_PROJECT_REPORT_BIS786.pdf")
+    shutil.copyfile(PDF_FULL_PATH, fe_full)
+    print(f"Copied full report PDF to: {fe_full}")
+
+if success_plag:
+    # Copy to user's Windows Downloads folder
+    dl_plag = os.path.join(DOWNLOADS_DIR, "PLAGIARISM_CHECK_CHAPTERS_1_TO_8.pdf")
+    shutil.copyfile(PDF_PLAG_PATH, dl_plag)
+    print(f"Copied plagiarism check PDF to: {dl_plag}")
+
+    # Copy to frontend public folder
+    fe_plag = os.path.join(FRONTEND_PUBLIC, "PLAGIARISM_CHECK_CHAPTERS_1_TO_8.pdf")
+    shutil.copyfile(PDF_PLAG_PATH, fe_plag)
+    print(f"Copied plagiarism check PDF to: {fe_plag}")
+
+print("PDF Build and Distribution Process Complete.")
